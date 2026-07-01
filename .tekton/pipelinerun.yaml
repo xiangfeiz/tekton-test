@@ -1,0 +1,73 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: my-pipeline-run
+  namespace: tekton-demo
+  annotations:
+    # Trigger on Pull Requests and Push events
+    pipelinesascode.tekton.dev/on-event: "[pull_request, push]"
+
+    # Run only on the main branch
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+
+    # Automatically pull and resolve the git-clone task from Artifact Hub
+    pipelinesascode.tekton.dev/task: "git-clone"
+
+    # Clean up older pipeline run executions (keep only the last 5)
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+spec:
+  params:
+    - name: repo_url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+  pipelineSpec:
+    params:
+      - name: repo_url
+      - name: revision
+    workspaces:
+      - name: source
+      - name: basic-auth
+    tasks:
+      - name: fetch-repository
+        taskRef:
+          name: git-clone
+        workspaces:
+          - name: output
+            workspace: source
+          - name: basic-auth
+            workspace: basic-auth
+        params:
+          - name: url
+            value: $(params.repo_url)
+          - name: revision
+            value: $(params.revision)
+      - name: hello-world
+        runAfter:
+          - fetch-repository
+        workspaces:
+          - name: source
+            workspace: source
+        taskSpec:
+          workspaces:
+            - name: source
+          steps:
+            - name: greet
+              image: alpine:latest
+              workingDir: $(workspaces.source.path)
+              script: |
+                echo "Hello, Pipelines-as-Code!"
+                echo "Checking out the codebase directory:"
+                ls -la
+  workspaces:
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
